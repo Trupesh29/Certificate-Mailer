@@ -1,0 +1,9 @@
+fastapi
+uvicorn
+reportlab
+pypdf
+pandas
+python-multipart
+SQLAlchemy
+aiosqlite
+python-dotenv
