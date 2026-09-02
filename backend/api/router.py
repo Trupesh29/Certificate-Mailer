@@ -191,3 +191,20 @@ async def retry_failed(batch_id: int, background_tasks: BackgroundTasks, db: Asy
     
     background_tasks.add_task(process_batch_background, batch_id)
     return {"message": "Retry processing started in background"}
+
+@router.get("/verify/{certificate_id}")
+async def verify_certificate(certificate_id: str, db: AsyncSession = Depends(get_db)):
+    result = await db.execute(select(StudentCertificate).where(StudentCertificate.certificate_id == certificate_id))
+    cert = result.scalars().first()
+    
+    if not cert:
+        raise HTTPException(status_code=404, detail="Certificate not found")
+        
+    return {
+        "verified": True,
+        "name": cert.name,
+        "email": cert.email,
+        "issued_at": cert.sent_at,
+        "custom_fields": cert.custom_fields,
+        "status": cert.send_status
+    }

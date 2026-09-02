@@ -4,6 +4,8 @@ from reportlab.pdfgen import canvas
 from reportlab.lib.colors import HexColor
 from reportlab.pdfbase import pdfmetrics
 import os
+import qrcode
+import tempfile
 
 def get_text_width(text, font_name, font_size):
     try:
@@ -11,7 +13,7 @@ def get_text_width(text, font_name, font_size):
     except KeyError:
         return pdfmetrics.stringWidth(text, "Helvetica", font_size)
 
-def generate_certificate(template_path: str, output_path: str, text_fields: list):
+def generate_certificate(template_path: str, output_path: str, text_fields: list, qr_data=None, qr_position=None):
     """
     text_fields is a list of dicts:
     {
@@ -56,6 +58,26 @@ def generate_certificate(template_path: str, output_path: str, text_fields: list
             can.drawRightString(x, y, text)
         else:
             can.drawString(x, y, text)
+
+    if qr_data and qr_position:
+        # Generate QR code
+        qr = qrcode.QRCode(
+            version=1,
+            error_correction=qrcode.constants.ERROR_CORRECT_L,
+            box_size=10,
+            border=4,
+        )
+        qr.add_data(qr_data)
+        qr.make(fit=True)
+        img = qr.make_image(fill_color="black", back_color="white")
+        
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".png") as tf:
+            img.save(tf.name)
+            qr_temp_path = tf.name
+            
+        can.drawImage(qr_temp_path, qr_position.get('x', 650), qr_position.get('y', 50), 
+                    width=qr_position.get('size', 100), height=qr_position.get('size', 100))
+        os.remove(qr_temp_path)
 
     can.save()
     packet.seek(0)

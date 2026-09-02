@@ -1,6 +1,7 @@
 import { BrowserRouter, Routes, Route, Link } from 'react-router-dom';
 import Dashboard from './pages/Dashboard';
 import NewBatch from './pages/NewBatch';
+import VerificationPage from './pages/VerificationPage';
 import { Mail, LayoutDashboard, PlusCircle } from 'lucide-react';
 
 function App() {
@@ -34,6 +35,7 @@ function App() {
             <Routes>
               <Route path="/" element={<Dashboard />} />
               <Route path="/new" element={<NewBatch />} />
+              <Route path="/verify/:id" element={<VerificationPage />} />
             </Routes>
           </div>
         </main>

@@ -66,13 +66,20 @@ async def process_batch_background(batch_id: int):
                 filename = f"{safe_name}_{cert.id}.pdf"
                 output_path = os.path.join(output_dir, filename)
                 
-                # We need to run synchronous generate_certificate in a thread, but for now we'll just call it
-                # In a heavy production app, use loop.run_in_executor
-                generate_certificate(template.file_path, output_path, text_fields)
-                
                 cert.certificate_path = output_path
                 if not cert.certificate_id:
                     cert.certificate_id = str(uuid.uuid4())
+                    
+                # We need to run synchronous generate_certificate in a thread, but for now we'll just call it
+                # In a heavy production app, use loop.run_in_executor
+                verify_url = f"http://localhost:5173/verify/{cert.certificate_id}"
+                generate_certificate(
+                    template.file_path, 
+                    output_path, 
+                    text_fields,
+                    qr_data=verify_url,
+                    qr_position={"x": 650, "y": 50, "size": 100}
+                )
                     
                 # 2. Send Email
                 # Hardcoded template for now. Could be fetched from database later.

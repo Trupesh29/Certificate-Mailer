@@ -7,3 +7,5 @@ python-multipart
 SQLAlchemy
 aiosqlite
 python-dotenv
+qrcode
+Pillow
