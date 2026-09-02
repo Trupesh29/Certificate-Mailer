@@ -1,6 +1,6 @@
 import axios from 'axios';
 
-const API_URL = 'http://localhost:8000/api';
+export const API_URL = 'http://localhost:8000/api';
 
 const client = axios.create({
   baseURL: API_URL,
@@ -33,6 +33,11 @@ export const api = {
 
   getBatchStatus: async (batchId) => {
     const res = await client.get(`/batches/${batchId}/status`);
+    return res.data;
+  },
+
+  retryFailedBatch: async (batchId) => {
+    const res = await client.post(`/batches/${batchId}/retry-failed`);
     return res.data;
   },
 };

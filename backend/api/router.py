@@ -1,4 +1,6 @@
+import asyncio
 from fastapi import APIRouter, UploadFile, File, Form, Depends, HTTPException, BackgroundTasks
+from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 import os
@@ -132,3 +134,60 @@ async def get_batch_status(batch_id: int, db: AsyncSession = Depends(get_db)):
         "pending": pending,
         "total": batch.total_rows
     }
+
+@router.get("/batches/{batch_id}/events")
+async def get_batch_events(batch_id: int):
+    async def event_generator():
+        # A new session for the generator so it doesn't close prematurely
+        from core.database import AsyncSessionLocal
+        while True:
+            async with AsyncSessionLocal() as session:
+                result = await session.execute(select(Batch).where(Batch.id == batch_id))
+                batch = result.scalars().first()
+                if not batch:
+                    yield "data: {\"error\": \"Batch not found\"}\n\n"
+                    break
+                    
+                res_certs = await session.execute(select(StudentCertificate).where(StudentCertificate.batch_id == batch_id))
+                certs = res_certs.scalars().all()
+                
+                sent = sum(1 for c in certs if c.send_status == "sent")
+                failed = sum(1 for c in certs if c.send_status == "failed")
+                pending = sum(1 for c in certs if c.send_status == "pending")
+                
+                payload = {
+                    "status": batch.status,
+                    "sent": sent,
+                    "failed": failed,
+                    "pending": pending,
+                    "total": batch.total_rows
+                }
+                
+                yield f"data: {json.dumps(payload)}\n\n"
+                
+                if batch.status == "completed":
+                    break
+            
+            await asyncio.sleep(2)
+            
+    return StreamingResponse(event_generator(), media_type="text/event-stream")
+
+@router.post("/batches/{batch_id}/retry-failed")
+async def retry_failed(batch_id: int, background_tasks: BackgroundTasks, db: AsyncSession = Depends(get_db)):
+    result = await db.execute(select(Batch).where(Batch.id == batch_id))
+    batch = result.scalars().first()
+    if not batch:
+        raise HTTPException(status_code=404, detail="Batch not found")
+        
+    if batch.status == "processing":
+        raise HTTPException(status_code=400, detail="Batch is already processing")
+        
+    # Reset failed certificates to pending
+    res_certs = await db.execute(select(StudentCertificate).where(StudentCertificate.batch_id == batch_id).where(StudentCertificate.send_status == "failed"))
+    certs = res_certs.scalars().all()
+    for cert in certs:
+        cert.send_status = "pending"
+    await db.commit()
+    
+    background_tasks.add_task(process_batch_background, batch_id)
+    return {"message": "Retry processing started in background"}

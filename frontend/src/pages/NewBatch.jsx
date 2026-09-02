@@ -1,6 +1,6 @@
-import { useState } from 'react';
-import { UploadCloud, File, FileSpreadsheet, ArrowRight, Loader2 } from 'lucide-react';
-import api from '../api/client';
+import { useState, useEffect } from 'react';
+import { UploadCloud, File, FileSpreadsheet, ArrowRight, Loader2, Play, RefreshCw, Mail } from 'lucide-react';
+import api, { API_URL } from '../api/client';
 import PDFEditor from '../components/PDFEditor';
 
 export default function NewBatch() {
@@ -12,6 +12,32 @@ export default function NewBatch() {
   // Data from backend
   const [templateId, setTemplateId] = useState(null);
   const [batchData, setBatchData] = useState(null);
+  
+  // Dashboard / SSE state
+  const [jobStarted, setJobStarted] = useState(false);
+  const [emailSubject, setEmailSubject] = useState('Your Certificate is Ready!');
+  const [emailBody, setEmailBody] = useState('Hi {name},\n\nPlease find your generated certificate attached.\n\nBest,\nAdmin Team');
+  const [liveStats, setLiveStats] = useState({ sent: 0, failed: 0, pending: 0, total: 0, status: 'pending' });
+
+  useEffect(() => {
+    if (jobStarted && batchData?.batch_id) {
+      const source = new EventSource(`${API_URL}/batches/${batchData.batch_id}/events`);
+      
+      source.onmessage = (event) => {
+        const data = JSON.parse(event.data);
+        if (data.error) {
+          source.close();
+          return;
+        }
+        setLiveStats(data);
+        if (data.status === 'completed') {
+          source.close();
+        }
+      };
+
+      return () => source.close();
+    }
+  }, [jobStarted, batchData?.batch_id]);
 
   const handleUploads = async () => {
     if (!templateFile || !csvFile) return;
@@ -40,12 +66,21 @@ export default function NewBatch() {
     setLoading(true);
     try {
       await api.sendBatch(batchData.batch_id);
-      setStep(3); // Success/Status screen
+      setJobStarted(true);
     } catch (error) {
       console.error("Failed to start send job", error);
       alert("Failed to start batch processing.");
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleRetry = async () => {
+    if (!batchData?.batch_id) return;
+    try {
+      await api.retryFailedBatch(batchData.batch_id);
+    } catch (error) {
+      alert("Failed to retry.");
     }
   };
 
@@ -137,28 +172,111 @@ export default function NewBatch() {
 
           <div className="flex justify-end mt-4">
             <button 
-              onClick={startSending}
-              disabled={loading}
-              className="flex items-center gap-2 bg-emerald-600 hover:bg-emerald-500 text-white px-6 py-3 rounded-xl font-bold transition-all shadow-lg"
+              onClick={() => setStep(3)}
+              className="flex items-center gap-2 bg-blue-600 hover:bg-blue-500 text-white px-6 py-3 rounded-xl font-bold transition-all shadow-lg"
             >
-              {loading ? <Loader2 className="w-5 h-5 animate-spin" /> : 'Start Bulk Send'}
+              Continue to Dispatch <ArrowRight className="w-5 h-5" />
             </button>
           </div>
         </div>
       )}
       
       {step === 3 && (
-        <div className="bg-slate-900/50 border border-slate-800 p-12 rounded-2xl text-center shadow-xl">
-          <div className="w-20 h-20 bg-blue-500/20 rounded-full flex items-center justify-center mx-auto mb-6">
-            <UploadCloud className="w-10 h-10 text-blue-400" />
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 mt-8">
+          {/* Email Composer */}
+          <div className="bg-slate-900/50 border border-slate-800 p-6 rounded-2xl shadow-xl flex flex-col">
+            <h2 className="text-xl font-bold text-white mb-4 flex items-center gap-2">
+              <Mail className="w-5 h-5 text-blue-400" /> Email Template
+            </h2>
+            <div className="space-y-4 flex-1">
+              <div>
+                <label className="text-sm font-medium text-slate-400 mb-1 block">Subject</label>
+                <input 
+                  type="text" 
+                  value={emailSubject}
+                  onChange={e => setEmailSubject(e.target.value)}
+                  disabled={jobStarted}
+                  className="w-full bg-slate-950 border border-slate-800 rounded-lg p-3 text-white focus:border-blue-500 outline-none transition-colors disabled:opacity-50"
+                />
+              </div>
+              <div className="flex-1 flex flex-col h-full min-h-[250px]">
+                <label className="text-sm font-medium text-slate-400 mb-1 block">Body</label>
+                <textarea 
+                  value={emailBody}
+                  onChange={e => setEmailBody(e.target.value)}
+                  disabled={jobStarted}
+                  className="w-full flex-1 bg-slate-950 border border-slate-800 rounded-lg p-3 text-white focus:border-blue-500 outline-none transition-colors resize-none disabled:opacity-50"
+                ></textarea>
+                <p className="text-xs text-slate-500 mt-2">Use {'{name}'} or {'{email}'} as variables.</p>
+              </div>
+            </div>
           </div>
-          <h2 className="text-2xl font-bold text-white mb-2">Job Dispatched!</h2>
-          <p className="text-slate-400 mb-8 max-w-md mx-auto">
-            Your batch is currently being processed in the background. The server is generating PDFs and sending emails.
-          </p>
-          <a href="/" className="bg-slate-800 hover:bg-slate-700 text-white px-6 py-3 rounded-xl font-bold transition-colors inline-block">
-            Go to Dashboard
-          </a>
+
+          {/* Live Dashboard */}
+          <div className="bg-slate-900/50 border border-slate-800 p-6 rounded-2xl shadow-xl flex flex-col">
+            <h2 className="text-xl font-bold text-white mb-6">Dispatch Center</h2>
+            
+            {!jobStarted ? (
+              <div className="flex-1 flex flex-col items-center justify-center text-center p-6 border-2 border-dashed border-slate-700 rounded-xl">
+                <UploadCloud className="w-16 h-16 text-slate-500 mb-4" />
+                <h3 className="text-lg font-bold text-white mb-2">Ready to Send</h3>
+                <p className="text-slate-400 mb-6">You are about to generate and email {batchData?.valid_rows} certificates.</p>
+                <button 
+                  onClick={startSending}
+                  disabled={loading}
+                  className="flex items-center gap-2 bg-emerald-600 hover:bg-emerald-500 text-white px-8 py-4 rounded-xl font-bold transition-all shadow-lg hover:shadow-emerald-500/20 active:scale-95 text-lg w-full justify-center"
+                >
+                  {loading ? <Loader2 className="w-6 h-6 animate-spin" /> : <Play className="w-6 h-6 fill-current" />}
+                  {loading ? 'Starting...' : 'Send Bulk Mail'}
+                </button>
+              </div>
+            ) : (
+              <div className="flex-1 flex flex-col">
+                <div className="flex items-center justify-between mb-8">
+                  <div className="flex items-center gap-3">
+                    {liveStats.status === 'processing' && <Loader2 className="w-6 h-6 text-blue-400 animate-spin" />}
+                    {liveStats.status === 'completed' && <div className="w-6 h-6 bg-emerald-500 rounded-full" />}
+                    <span className="text-xl font-bold text-white capitalize">{liveStats.status}</span>
+                  </div>
+                  <div className="text-2xl font-bold text-slate-300">
+                    {liveStats.sent + liveStats.failed} / {batchData?.valid_rows}
+                  </div>
+                </div>
+
+                {/* Progress Bar */}
+                <div className="w-full h-4 bg-slate-800 rounded-full overflow-hidden mb-8 flex">
+                  <div 
+                    className="h-full bg-emerald-500 transition-all duration-500"
+                    style={{ width: `${(liveStats.sent / batchData?.valid_rows) * 100}%` }}
+                  ></div>
+                  <div 
+                    className="h-full bg-red-500 transition-all duration-500"
+                    style={{ width: `${(liveStats.failed / batchData?.valid_rows) * 100}%` }}
+                  ></div>
+                </div>
+
+                <div className="grid grid-cols-2 gap-4 mb-8">
+                  <div className="bg-emerald-500/10 border border-emerald-500/20 p-4 rounded-xl">
+                    <p className="text-slate-400 text-sm mb-1">Successfully Sent</p>
+                    <p className="text-3xl font-bold text-emerald-400">{liveStats.sent}</p>
+                  </div>
+                  <div className="bg-red-500/10 border border-red-500/20 p-4 rounded-xl">
+                    <p className="text-slate-400 text-sm mb-1">Failed</p>
+                    <p className="text-3xl font-bold text-red-400">{liveStats.failed}</p>
+                  </div>
+                </div>
+
+                {liveStats.failed > 0 && liveStats.status === 'completed' && (
+                  <button 
+                    onClick={handleRetry}
+                    className="w-full flex items-center justify-center gap-2 bg-slate-800 hover:bg-slate-700 text-white px-6 py-4 rounded-xl font-bold transition-all"
+                  >
+                    <RefreshCw className="w-5 h-5" /> Retry {liveStats.failed} Failed Emails
+                  </button>
+                )}
+              </div>
+            )}
+          </div>
         </div>
       )}
     </div>
