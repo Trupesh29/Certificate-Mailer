@@ -9,3 +9,5 @@ aiosqlite
 python-dotenv
 qrcode
 Pillow
+PyJWT
+passlib[bcrypt]

@@ -112,3 +112,11 @@ async def process_batch_background(batch_id: int):
         batch.status = "completed"
         batch.completed_at = datetime.datetime.utcnow()
         await session.commit()
+        
+        # Auto-cleanup: delete successfully sent PDFs
+        for cert in certificates:
+            if cert.send_status == "sent" and cert.certificate_path and os.path.exists(cert.certificate_path):
+                try:
+                    os.remove(cert.certificate_path)
+                except Exception as e:
+                    print(f"Failed to cleanup {cert.certificate_path}: {e}")

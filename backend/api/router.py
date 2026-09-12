@@ -1,5 +1,6 @@
 import asyncio
 from fastapi import APIRouter, UploadFile, File, Form, Depends, HTTPException, BackgroundTasks
+from fastapi.security import OAuth2PasswordRequestForm
 from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
@@ -10,14 +11,29 @@ from core.database import get_db
 from core.models import Template, Batch, StudentCertificate
 from core.csv_parser import process_csv
 from core.tasks import process_batch_background
+from core.auth import get_current_user, verify_password, create_access_token, ADMIN_EMAIL, ADMIN_PASSWORD_HASH
 
 router = APIRouter()
 
 UPLOAD_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "data", "uploads")
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 
+@router.post("/login")
+async def login(form_data: OAuth2PasswordRequestForm = Depends()):
+    if form_data.username != ADMIN_EMAIL or not verify_password(form_data.password, ADMIN_PASSWORD_HASH):
+        raise HTTPException(status_code=400, detail="Incorrect email or password")
+        
+    access_token = create_access_token(data={"sub": ADMIN_EMAIL})
+    return {"access_token": access_token, "token_type": "bearer"}
+
+@router.get("/batches")
+async def get_batches(db: AsyncSession = Depends(get_db), current_user: str = Depends(get_current_user)):
+    result = await db.execute(select(Batch).order_by(Batch.created_at.desc()))
+    batches = result.scalars().all()
+    return batches
+
 @router.post("/templates")
-async def upload_template(file: UploadFile = File(...), db: AsyncSession = Depends(get_db)):
+async def upload_template(file: UploadFile = File(...), db: AsyncSession = Depends(get_db), current_user: str = Depends(get_current_user)):
     file_path = os.path.join(UPLOAD_DIR, file.filename)
     with open(file_path, "wb") as buffer:
         shutil.copyfileobj(file.file, buffer)
@@ -45,7 +61,8 @@ async def upload_template(file: UploadFile = File(...), db: AsyncSession = Depen
 async def create_batch(
     template_id: int = Form(...),
     file: UploadFile = File(...),
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db),
+    current_user: str = Depends(get_current_user)
 ):
     # Verify template exists
     result = await db.execute(select(Template).where(Template.id == template_id))
@@ -100,7 +117,7 @@ async def create_batch(
     return {"batch_id": batch.id, "valid_rows": batch.valid_rows, "invalid_rows": batch.invalid_rows}
 
 @router.post("/batches/{batch_id}/send")
-async def send_batch(batch_id: int, background_tasks: BackgroundTasks, db: AsyncSession = Depends(get_db)):
+async def send_batch(batch_id: int, background_tasks: BackgroundTasks, db: AsyncSession = Depends(get_db), current_user: str = Depends(get_current_user)):
     result = await db.execute(select(Batch).where(Batch.id == batch_id))
     batch = result.scalars().first()
     if not batch:
@@ -113,7 +130,7 @@ async def send_batch(batch_id: int, background_tasks: BackgroundTasks, db: Async
     return {"message": "Batch processing started in background"}
 
 @router.get("/batches/{batch_id}/status")
-async def get_batch_status(batch_id: int, db: AsyncSession = Depends(get_db)):
+async def get_batch_status(batch_id: int, db: AsyncSession = Depends(get_db), current_user: str = Depends(get_current_user)):
     result = await db.execute(select(Batch).where(Batch.id == batch_id))
     batch = result.scalars().first()
     if not batch:
@@ -173,7 +190,7 @@ async def get_batch_events(batch_id: int):
     return StreamingResponse(event_generator(), media_type="text/event-stream")
 
 @router.post("/batches/{batch_id}/retry-failed")
-async def retry_failed(batch_id: int, background_tasks: BackgroundTasks, db: AsyncSession = Depends(get_db)):
+async def retry_failed(batch_id: int, background_tasks: BackgroundTasks, db: AsyncSession = Depends(get_db), current_user: str = Depends(get_current_user)):
     result = await db.execute(select(Batch).where(Batch.id == batch_id))
     batch = result.scalars().first()
     if not batch:
